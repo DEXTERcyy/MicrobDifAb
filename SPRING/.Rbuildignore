@@ -1,0 +1,5 @@
+^SPRING\.Rproj$
+^\.Rproj\.user$
+^README\.Rmd$
+^README-.*\.png$
+^data-raw$
