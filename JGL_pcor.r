@@ -165,39 +165,35 @@ jgl_result <- JGL_modified(corr_matrices = list(pcor.K_naural, pcor.K_potting),
 # %% Visualizations
 library(igraph)
 library(RColorBrewer)
-theta1 <- jgl_result$theta[[1]]
-theta2 <- jgl_result$theta[[2]]
-
+theta <- list(jgl_result$theta[[1]],jgl_result$theta[[2]])
+K=length(theta)
 # Adjacency matrices
-threshold <- 0.01
-adj1 <- abs(theta1) > threshold
-adj2 <- abs(theta2) > threshold
-adj_combined <- adj1 | adj2
-
-# Create igraph
-g <- graph_from_adjacency_matrix(adj_combined, mode = "undirected", diag = FALSE)
-
-# Set edge colors
-edge_colors <- rep("grey", ecount(g))
-edge_colors[which(adj1[lower.tri(adj1)] & adj2[lower.tri(adj2)])] <- "purple"  # Edges in both conditions
-edge_colors[which(adj1[lower.tri(adj1)] & !adj2[lower.tri(adj2)])] <- "red"    # Edges only in naural
-edge_colors[which(!adj1[lower.tri(adj1)] & adj2[lower.tri(adj2)])] <- "blue"   # Edges only in potting
-
-# Set vertex colors
-vertex_colors <- brewer.pal(9, "Set1")[1]
-
-# Plot the graph
-plot(g,
-      vertex.color = vertex_colors,
-      vertex.size = 5,
-      vertex.label = V(g)$name,
-      vertex.label.cex = 0.8,
-      edge.color = edge_colors,
-      main = "Network Graph")
-
-# Add legend
-# legend("bottomright", 
-#       legend = c("Both conditions", "Naurual only", "Potting only"),
-#       col = c("purple", "red", "blue"),
-#       lwd = 2,
-#       cex = 0.8)
+make.adj.matrix <- function(theta, separate=FALSE)# from JGL.r
+  {
+    K = length(theta)
+    adj = list()
+    if(separate)
+    {
+      for(k in 1:K)
+      {
+        adj[[k]] = (abs(theta[[k]])>1e-5)*1
+      }
+    }
+    if(!separate)
+    {
+      adj = 0*theta[[1]]
+      for(k in 1:K)
+      {
+        adj = adj+(abs(theta[[k]])>1e-5)*2^(k-1)
+      }
+    }
+  return(adj)
+  }
+adj <- make.adj.matrix(theta)
+diag(adj) = 0
+# %%Create igraph
+gadj = graph.adjacency(adj,mode="upper",weighted=TRUE)
+# Weight the edges according to the soil conditions they belong to
+E(gadj)$color = 2^(K)-edge_attr(gadj,"weight")
+plot(gadj, vertex.frame.color="white",layout=layout.fruchterman.reingold, 
+	vertex.label=NA, vertex.label.cex=3, vertex.size=1)
