@@ -4,25 +4,22 @@ library(SPRING)
 library(SpiecEasi)
 library(JGL)
 data_soil_raw <- readRDS("data\\soil_sample_gr2.rds")
-
 # Remove taxa not seen more than 3 times in at least 20% of the samples.
 data_soil = filter_taxa(data_soil_raw, function(x) sum(x > 3) > (0.2*length(x)), TRUE)
 otu_tax <- tax_table(data_soil) # Assign variables
 otu_Ab <- t(otu_table(data_soil))
-  # any(rowSums(otu_Ab) == 0)
-
+#any(rowSums(otu_Ab) == 0)
+# Split by soil conditions and filter 0 counts taxas
 soil_info <- sample_data(data_soil)[, "Soil_Type"]
 otu_Ab_naural <- otu_Ab[soil_info == "Forest",
                         colSums(otu_Ab[soil_info == "Forest",]) != 0]
 otu_Ab_potting <- otu_Ab[soil_info == "Potting",
                         colSums(otu_Ab[soil_info == "Potting",]) != 0]
-
-# shared taxa/colnames between otu_Ab_naural and otu_Ab_potting
+# Keep only shared taxa/cols between otu_Ab_naural and otu_Ab_potting
 shared_taxa <- intersect(colnames(otu_Ab_naural), colnames(otu_Ab_potting))
 otu_Ab_naural <- otu_Ab_naural[, shared_taxa]
 otu_Ab_potting <- otu_Ab_potting[, shared_taxa]
-  # any(colSums(otu_Ab_naural) == 0) || any(colSums(otu_Ab_potting) == 0)))
-  
+#any(colSums(otu_Ab_naural) == 0) || any(colSums(otu_Ab_potting) == 0)  
 # %% SPRING
 otu_Ab_naural_fit <- SPRING(otu_Ab_naural, Rmethod = "approx", quantitative = TRUE, 
               lambdaseq = "data-specific", nlambda = 20, rep.num = 20)
@@ -39,16 +36,16 @@ opt.K_potting <- otu_Ab_potting_fit$output$stars$opt.index
 adj.K_potting <- as.matrix(otu_Ab_potting_fit$fit$est$path[[opt.K_potting]])
 pcor.K_potting <- as.matrix(SpiecEasi::symBeta(otu_Ab_potting_fit$output$est$beta[[opt.K_potting]], mode = 'maxabs'))
 colnames(pcor.K_potting) <- colnames(otu_Ab_potting)
-  # isSymmetric(pcor.K_naural) && isSymmetric(adj.K_potting)
-  # anyNA(pcor.K_naural) || anyNA(pcor.K_potting)
+#isSymmetric(pcor.K_naural) && isSymmetric(adj.K_potting)
+#anyNA(pcor.K_naural) || anyNA(pcor.K_potting)
 
 # %% Save progress
-  # write.csv(pcor.K_naural, "pcor_naural.csv")
-  # write.csv(pcor.K_potting, "pcor_potting.csv")
+#write.csv(pcor.K_naural, "pcor_naural.csv")
+#write.csv(pcor.K_potting, "pcor_potting.csv")
 save.image(file = "workspace_JGL_pcor.RData")
 # %% Load progress
 load("workspace_JGL_pcor.RData")
-#Fused Graphical Lasso on Partial Correlation Matrices
+# Fused Graphical Lasso on Partial Correlation Matrices
 soft <- function(a,lam,penalize.diagonal)
   { # if last argument is FALSE, soft-threshold a matrix but don't penalize the diagonal
     out <- sign(a)*pmax(0, abs(a)-lam)
@@ -171,7 +168,7 @@ library(RColorBrewer)
 theta1 <- jgl_result$theta[[1]]
 theta2 <- jgl_result$theta[[2]]
 
-# adjacency matrices
+# Adjacency matrices
 threshold <- 0.01
 adj1 <- abs(theta1) > threshold
 adj2 <- abs(theta2) > threshold
