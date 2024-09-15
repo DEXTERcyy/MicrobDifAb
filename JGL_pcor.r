@@ -45,9 +45,9 @@ colnames(pcor.K_potting) <- colnames(otu_Ab_potting)
 # %% Save progress
   # write.csv(pcor.K_naural, "pcor_naural.csv")
   # write.csv(pcor.K_potting, "pcor_potting.csv")
-save.image(file = "workspace.RData")
+save.image(file = "workspace_JGL_pcor.RData")
 # %% Load progress
-load("workspace.RData")
+load("workspace_JGL_pcor.RData")
 #Fused Graphical Lasso on Partial Correlation Matrices
 penalty.as.matrix <-function(lambda,p,penalize.diagonal) # from JGL.r
   {
