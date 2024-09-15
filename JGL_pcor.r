@@ -191,7 +191,7 @@ make.adj.matrix <- function(theta, separate=FALSE)# from JGL.r
   }
 adj <- make.adj.matrix(theta)
 diag(adj) = 0
-# %%Create igraph
+# Create igraph
 gadj = graph.adjacency(adj,mode="upper",weighted=TRUE)
 # Weight the edges according to the soil conditions they belong to
 E(gadj)$color = 2^(K)-edge_attr(gadj,"weight")
