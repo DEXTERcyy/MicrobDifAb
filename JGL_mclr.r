@@ -60,7 +60,7 @@ mclr <- function(dat, base = exp(1), tol = 1e-16, eps = NULL, atleast = 1) #from
     }
   }
 otu_Ab_naural_mclr <- mclr(as(otu_Ab_naural,"matrix"))
-otu_Ab_potting_mclr <- mclr(as(otu_Ab_naural,"matrix"))
+otu_Ab_potting_mclr <- mclr(as(otu_Ab_potting,"matrix"))
 
-results <- JGL(Y = list(otu_Ab_naural_mclr, otu_Ab_potting_mclr),penalty="fused",lambda1=.55,lambda2=.1)
+results <- JGL(Y = list(otu_Ab_naural_mclr, otu_Ab_potting_mclr),penalty="fused",lambda1=.3,lambda2=.2)
 plot.jgl(results)
