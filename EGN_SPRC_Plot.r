@@ -3,19 +3,15 @@ library(phyloseq)
 library(SPRING)
 library(SpiecEasi)
 library(JGL)
-library("qgraph")
-library("parallel")
-library("psych")
-library("mvtnorm")
-library("EstimateGroupNetwork")
+library(EstimateGroupNetwork)
+
 ncores <- detectCores() -1
 options(mc.cores = ncores)
-
 data_soil_raw <- readRDS("data\\soil_sample_gr2.rds")
 
 # Remove taxa not seen more than 3 times in at least 20% of the samples.
 data_soil = filter_taxa(data_soil_raw, function(x) sum(x > 3) > (0.2*length(x)), TRUE)
-otu_tax <- tax_table(data_soil) # Assign variables
+otu_tax <- tax_table(data_soil)[,1:5]
 otu_Ab <- t(otu_table(data_soil))
 #any(rowSums(otu_Ab) == 0)
 # Split by soil conditions and filter 0 counts taxas
@@ -29,8 +25,7 @@ shared_taxa <- intersect(colnames(otu_Ab_naural), colnames(otu_Ab_potting))
 otu_Ab_naural <- otu_Ab_naural[, shared_taxa]
 otu_Ab_potting <- otu_Ab_potting[, shared_taxa]
 #any(colSums(otu_Ab_naural) == 0) || any(colSums(otu_Ab_potting) == 0)  
-
-# %% SPRC
+# SPRC
 mclr <- function(dat, base = exp(1), tol = 1e-16, eps = NULL, atleast = 1) #from SPRING.r
   {
     dat <- as.matrix(dat)
@@ -72,30 +67,86 @@ otu_Ab_naural_mclr <- mclr(as(otu_Ab_naural,"matrix"))
 otu_Ab_potting_mclr <- mclr(as(otu_Ab_potting,"matrix"))
 Kcor_naural <- mixedCCA::estimateR(otu_Ab_naural_mclr, type = "trunc", method = "approx", tol = 1e-6, verbose = TRUE)$R
 Kcor_potting <- mixedCCA::estimateR(otu_Ab_potting_mclr, type = "trunc", method = "approx", tol = 1e-6, verbose = TRUE)$R
-
-# %%
-library("qgraph")
-library("parallel")
-library("psych")
-library("mvtnorm")
+# Graphical Lasso
 Res <- EstimateGroupNetwork(list(naural = Kcor_naural, potting = Kcor_potting), inputType = "list.of.covariance.matrices",
                           n = c(dim(otu_Ab_naural)[1],dim(otu_Ab_potting)[1]),
-                          nlambda1 = 2, nlambda2 = 2, truncate = 1e-10)
-Layout <- averageLayout(Res$naural,Res$potting)
-layout(t(1:2))
-qgraph(Res$naural, layout = Layout, title = "Naural (JGL)")
-qgraph(Res$potting, layout = Layout, title = "Potting (JGL)")
+                          nlambda1 = 10, nlambda2 = 10, truncate = 1e-10, criterion = 'aic')
+network_naural <- Res$naural
+network_potting <- Res$potting
 
-# pdf("data\\EGN_SPRC_JGL.pdf")
-# layout(t(1:2))
-# qgraph(Res$naural, layout = Layout, title = "Naural (JGL)")
-# qgraph(Res$potting, layout = Layout, title = "Potting (JGL)")
-# dev.off()
-# %% example
-# data(bfi)
-# bfi2 <- bfi[rowSums(is.na(bfi[,1:26])) == 0,]
-# CorMales <- cor_auto(bfi2[bfi2$gender == 1,1:25])
-# CorFemales <- cor_auto(bfi2[bfi2$gender == 2,1:25])
-# Res_exa <- EstimateGroupNetwork(list(males = CorMales, females = CorFemales),
-# n = c(sum(bfi2$gender == 1),sum(bfi2$gender == 2)))
-# qgraph(Res_exa$males, layout = Layout, title = "Males")
+
+
+# Plot results
+library(ggraph)
+library(igraph)
+library(tidyverse)
+library(RColorBrewer)
+
+# %% Extract taxonomic information
+otu_tax_df <- otu_tax %>%
+  as.data.frame() %>%
+  rownames_to_column("OTU") %>%
+  select(-OTU, everything(), OTU)
+
+pairs <- list(
+  c("Kingdom", "Phylum"),
+  c("Phylum", "Class"),
+  c("Class", "Order"),
+  c("Order", "Family"),
+  c("Family", "OTU")
+)
+# Function to create edges for a single pair
+create_edges <- function(pair, data) {
+  from <- data[[pair[1]]]
+  to <- data[[pair[2]]]
+  data.frame(from = from, to = to)
+}
+
+# Apply the function to all pairs and combine the results
+edges <- unique(do.call(rbind, lapply(pairs, create_edges, data = otu_tax_df[otu_tax_df$OTU %in% shared_taxa, ])))
+
+# %%
+# Extract lower triangular part
+lower_tri <- lower.tri(network_naural, diag = FALSE)
+# Get non-zero elements and their indices
+non_zero <- which(lower_tri & network_naural != 0, arr.ind = TRUE)
+# Create the new table
+connect <- data.frame(
+  from = rownames(network_naural)[non_zero[, 1]],
+  to = colnames(network_naural)[non_zero[, 2]],
+  score = network_naural[non_zero]
+)
+
+#%% create a vertices data.frame. One line per object of our hierarchy
+vertices  <-  data.frame(
+  name = unique(c(as.character(edges$from), as.character(edges$to))) , 
+  value = runif(length(unique(c(as.character(edges$from), as.character(edges$to)))))
+)
+vertices$group  <-  edges$from[ match( vertices$name, edges$to ) ]
+
+vertices$id <- NA
+myleaves <- which(is.na(match(vertices$name, edges$from)))
+vertices$value[myleaves] <- colSums(network_naural) / sum(network_naural)
+nleaves <- length(myleaves)
+vertices$id[myleaves] <- seq(1:nleaves)
+vertices$angle <- 90 - 360 * vertices$id / nleaves
+vertices$angle <- ifelse(vertices$angle < -90, vertices$angle+180, vertices$angle)
+vertices$hjust <- ifelse( vertices$angle < -90, 1, 0)
+mygraph <- igraph::graph_from_data_frame( edges, vertices=vertices )
+from  <-  match( connect$from, vertices$name)
+to  <-  match( connect$to, vertices$name)
+
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_conn_bundle(data = get_con(from = from, to = to), alpha=0.2, width=0.1, aes(colour = after_stat(index))) +
+  scale_edge_colour_gradient(low = "red", high = "blue") +
+  geom_node_text(aes(x = x*1.15, y=y*1.15, filter = leaf, label=name, angle = angle, hjust=hjust, colour=group), size=2, alpha=1) +
+  geom_node_point(aes(filter = leaf, x = x*1.07, y=y*1.07, colour=group, size=value, alpha=0.2)) +
+  scale_colour_manual(values= rep( brewer.pal(14,"Paired") , 30)) +
+  scale_size_continuous(range = c(0.1,10) ) +
+
+  theme_void() +
+  theme(
+    legend.position="none",
+    plot.margin=unit(c(0,0,0,0),"cm"),
+  ) +
+  expand_limits(x = c(-1.3, 1.3), y = c(-1.3, 1.3))
