@@ -3,7 +3,15 @@ library(phyloseq)
 library(SPRING)
 library(SpiecEasi)
 library(JGL)
+library("qgraph")
+library("parallel")
+library("psych")
+library("mvtnorm")
+library("EstimateGroupNetwork")
+ncores <- detectCores() -1
+options(mc.cores = ncores)
 data_soil_raw <- readRDS("data\\soil_sample_gr2.rds")
+
 # Remove taxa not seen more than 3 times in at least 20% of the samples.
 data_soil = filter_taxa(data_soil_raw, function(x) sum(x > 3) > (0.2*length(x)), TRUE)
 otu_tax <- tax_table(data_soil) # Assign variables
@@ -64,3 +72,18 @@ otu_Ab_potting_mclr <- mclr(as(otu_Ab_potting,"matrix"))
 
 results <- JGL(Y = list(otu_Ab_naural_mclr, otu_Ab_potting_mclr),penalty="fused",lambda1=.3,lambda2=.2)
 plot.jgl(results)
+
+# Extract the precision matrices 
+prec_group1 <- results$theta[[1]]
+prec_group2 <- results$theta[[2]]
+
+diag(prec_group1) <- 0
+diag(prec_group2) <- 0
+
+
+Layout <- averageLayout(prec_group1,prec_group2)
+layout(t(1:2))
+qgraph(prec_group1, layout = Layout, title = "Natural (JGL)")
+qgraph(prec_group2, layout = Layout, title = "Potting (JGL)")
+
+save.image("JGL_mclr.rda")

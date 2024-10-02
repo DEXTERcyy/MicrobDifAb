@@ -24,7 +24,7 @@ shared_taxa <- intersect(colnames(otu_Ab_naural), colnames(otu_Ab_potting))
 otu_Ab_naural <- otu_Ab_naural[, shared_taxa]
 otu_Ab_potting <- otu_Ab_potting[, shared_taxa]
 
-# scaling
+# %%scaling
 common_scaling <- function(data)
   {
     depths <- rowSums(data)
@@ -61,7 +61,7 @@ synthesize_scaled_data <- function(dat)
 otu_Ab_naural_synthesized <- synthesize_scaled_data(otu_Ab_naural_scaled)
 otu_Ab_potting_synthesized <- synthesize_scaled_data(otu_Ab_potting_scaled)
 
-# %% mclr
+# mClr
 mclr <- function(dat, base = exp(1), tol = 1e-16, eps = NULL, atleast = 1) #from SPRING.r
   {
     dat <- as.matrix(dat)
@@ -101,3 +101,113 @@ mclr <- function(dat, base = exp(1), tol = 1e-16, eps = NULL, atleast = 1) #from
   }
 otu_Ab_naural_mclr <- mclr(otu_Ab_naural_synthesized)
 otu_Ab_potting_mclr <- mclr(otu_Ab_potting_synthesized)
+Kcor_naural <- mixedCCA::estimateR(otu_Ab_naural_mclr, type = "trunc", method = "approx", tol = 1e-6, verbose = TRUE)$R
+Kcor_potting <- mixedCCA::estimateR(otu_Ab_potting_mclr, type = "trunc", method = "approx", tol = 1e-6, verbose = TRUE)$R
+# Graphical Lasso
+Res <- EstimateGroupNetwork(list(naural = Kcor_naural, potting = Kcor_potting), inputType = "list.of.covariance.matrices",
+                          n = c(dim(otu_Ab_naural)[1],dim(otu_Ab_potting)[1]), labels = shared_taxa,
+                          nlambda1 = 10, nlambda2 = 10, truncate = 1e-10, criterion = 'aic')
+network_naural <- Res$naural
+network_potting <- Res$potting
+
+# %% Plot edge weights distribution
+library(ggplot2)
+
+# Convert the correlation matrices to vectors
+cor_values_naural <- as.vector(Kcor_naural)
+cor_values_potting <- as.vector(Kcor_potting)
+
+# Create a data frame for plotting
+cor_df <- data.frame(
+  correlation = c(cor_values_naural, cor_values_potting),
+  group = factor(rep(c("Natural", "Potting"), each = length(cor_values_naural)))
+)
+
+# Plot histogram
+hist_plot <- ggplot(cor_df, aes(x = correlation, fill = group)) +
+  geom_histogram(position = "dodge", bins = 30, alpha = 0.7) +
+  scale_fill_manual(values = c("Natural" = "blue", "Potting" = "red")) +
+  theme_minimal() +
+  labs(title = "Distribution of Correlation Values",
+       x = "Correlation",
+       y = "Frequency",
+       fill = "Soil Type")
+
+# Save the plot
+ggsave("histogram_comparison.pdf", hist_plot, width = 10, height = 6)
+
+# Return the plot
+return(hist_plot)
+
+# %%Plot Network
+library(ggraph)
+library(igraph)
+library(tidyverse)
+library(RColorBrewer)
+
+# Extract taxonomic information
+otu_tax_df <- otu_tax %>%
+  as.data.frame() %>%
+  rownames_to_column("OTU") %>%
+  select(-OTU, everything(), OTU)
+
+pairs <- list(
+  c("Kingdom", "Phylum"),
+  c("Phylum", "Class"),
+  c("Class", "Order"),
+  c("Order", "Family"),
+  c("Family", "OTU"))
+# Function to create edges for a single pair
+create_edges <- function(pair, data)
+  {
+    from <- data[[pair[1]]]
+    to <- data[[pair[2]]]
+    data.frame(from = from, to = to)
+  }
+
+# Apply the function to all pairs and combine the results
+edges <- unique(do.call(rbind, lapply(pairs, create_edges, data = otu_tax_df[otu_tax_df$OTU %in% shared_taxa, ])))
+
+# Extract lower triangular part
+lower_tri <- lower.tri(network_naural, diag = FALSE)
+# Get non-zero elements and their indices
+non_zero <- which(lower_tri & network_naural != 0, arr.ind = TRUE)
+# Create the new table
+connect <- data.frame(
+  from = rownames(network_naural)[non_zero[, 1]],
+  to = colnames(network_naural)[non_zero[, 2]],
+  score = network_naural[non_zero])
+
+# create a vertices data.frame. One line per object of our hierarchy
+vertices  <-  data.frame(
+  name = unique(c(as.character(edges$from), as.character(edges$to))) , 
+  value = runif(length(unique(c(as.character(edges$from), as.character(edges$to))))))
+vertices$group  <-  edges$from[ match( vertices$name, edges$to ) ]
+
+vertices$id <- NA
+myleaves <- which(is.na(match(vertices$name, edges$from)))
+vertices$value[myleaves] <- colSums(network_naural) / sum(network_naural)
+nleaves <- length(myleaves)
+vertices$id[myleaves] <- seq(1:nleaves)
+vertices$angle <- 90 - 360 * vertices$id / nleaves
+vertices$angle <- ifelse(vertices$angle < -90, vertices$angle+180, vertices$angle)
+vertices$hjust <- ifelse( vertices$angle < -90, 1, 0)
+mygraph <- igraph::graph_from_data_frame( edges, vertices=vertices )
+from  <-  match( connect$from, vertices$name)
+to  <-  match( connect$to, vertices$name)
+
+ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
+  geom_conn_bundle(data = get_con(from = from, to = to), alpha=0.2, width=0.1, aes(colour = after_stat(index))) +
+  scale_edge_colour_gradient(low = "red", high = "blue") +
+  geom_node_text(aes(x = x*1.15, y=y*1.15, filter = leaf, label=name, angle = angle, hjust=hjust, colour=group), size=2, alpha=1) +
+  geom_node_point(aes(filter = leaf, x = x*1.07, y=y*1.07, colour=group, size=value, alpha=0.2)) +
+  scale_colour_manual(values= rep( brewer.pal(14,"Paired") , 30)) +
+  scale_size_continuous(range = c(0.1,10) ) +
+
+  theme_void() +
+  theme(
+    legend.position="none",
+    plot.margin=unit(c(0,0,0,0),"cm"),
+  ) +
+  expand_limits(x = c(-1.3, 1.3), y = c(-1.3, 1.3))
+ggsave("naural_plot_synthesized.pdf", width = 12, height = 12, units = "in")

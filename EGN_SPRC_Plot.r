@@ -5,8 +5,7 @@ library(SpiecEasi)
 library(JGL)
 library(EstimateGroupNetwork)
 
-ncores <- detectCores() -1
-options(mc.cores = ncores)
+
 data_soil_raw <- readRDS("data\\soil_sample_gr2.rds")
 
 # Remove taxa not seen more than 3 times in at least 20% of the samples.
@@ -93,14 +92,14 @@ pairs <- list(
   c("Phylum", "Class"),
   c("Class", "Order"),
   c("Order", "Family"),
-  c("Family", "OTU")
-)
+  c("Family", "OTU"))
 # Function to create edges for a single pair
-create_edges <- function(pair, data) {
-  from <- data[[pair[1]]]
-  to <- data[[pair[2]]]
-  data.frame(from = from, to = to)
-}
+create_edges <- function(pair, data)
+  {
+    from <- data[[pair[1]]]
+    to <- data[[pair[2]]]
+    data.frame(from = from, to = to)
+  }
 
 # Apply the function to all pairs and combine the results
 edges <- unique(do.call(rbind, lapply(pairs, create_edges, data = otu_tax_df[otu_tax_df$OTU %in% shared_taxa, ])))
@@ -114,14 +113,12 @@ non_zero <- which(lower_tri & network_naural != 0, arr.ind = TRUE)
 connect <- data.frame(
   from = rownames(network_naural)[non_zero[, 1]],
   to = colnames(network_naural)[non_zero[, 2]],
-  score = network_naural[non_zero]
-)
+  score = network_naural[non_zero])
 
 #%% create a vertices data.frame. One line per object of our hierarchy
 vertices  <-  data.frame(
   name = unique(c(as.character(edges$from), as.character(edges$to))) , 
-  value = runif(length(unique(c(as.character(edges$from), as.character(edges$to)))))
-)
+  value = runif(length(unique(c(as.character(edges$from), as.character(edges$to))))))
 vertices$group  <-  edges$from[ match( vertices$name, edges$to ) ]
 
 vertices$id <- NA
@@ -150,3 +147,5 @@ ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
     plot.margin=unit(c(0,0,0,0),"cm"),
   ) +
   expand_limits(x = c(-1.3, 1.3), y = c(-1.3, 1.3))
+ggsave("naural_plot.pdf", width = 12, height = 12, units = "in")
+
