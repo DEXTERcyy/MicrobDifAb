@@ -46,22 +46,7 @@ common_scaling <- function(data)
 otu_Ab_naural_scaled <- common_scaling(otu_Ab_naural)
 otu_Ab_potting_scaled <- common_scaling(otu_Ab_potting)
 
-# synthesize data
-synthesize_scaled_data <- function(dat)
-  {
-    set.seed(10010)
-    graph <- SpiecEasi::make_graph('cluster', dat$n_OTUs, dat$n_edge)
-    Prec <- SpiecEasi::graph2prec(graph)
-    Cor <- cov2cor(SpiecEasi::prec2cov(Prec))
-    
-    X <- SpiecEasi::synth_comm_from_counts(dat$processed_data, mar = 2, distr = 'zinegbin', Sigma = Cor, n = dat$n_samples)
-    
-    return(X)
-  }
-otu_Ab_naural_synthesized <- synthesize_scaled_data(otu_Ab_naural_scaled)
-otu_Ab_potting_synthesized <- synthesize_scaled_data(otu_Ab_potting_scaled)
-
-# mClr
+# mClr normalization 
 mclr <- function(dat, base = exp(1), tol = 1e-16, eps = NULL, atleast = 1) #from SPRING.r
   {
     dat <- as.matrix(dat)
@@ -99,8 +84,8 @@ mclr <- function(dat, base = exp(1), tol = 1e-16, eps = NULL, atleast = 1) #from
       stop("check your eps value for additional positive shift. Otherwise, leave it as NULL.")
     }
   }
-otu_Ab_naural_mclr <- mclr(otu_Ab_naural_synthesized)
-otu_Ab_potting_mclr <- mclr(otu_Ab_potting_synthesized)
+otu_Ab_naural_mclr <- mclr(otu_Ab_naural_scaled$processed_data)
+otu_Ab_potting_mclr <- mclr(otu_Ab_potting_scaled$processed_data)
 Kcor_naural <- mixedCCA::estimateR(otu_Ab_naural_mclr, type = "trunc", method = "approx", tol = 1e-6, verbose = TRUE)$R
 Kcor_potting <- mixedCCA::estimateR(otu_Ab_potting_mclr, type = "trunc", method = "approx", tol = 1e-6, verbose = TRUE)$R
 # Graphical Lasso
@@ -109,6 +94,20 @@ Res <- EstimateGroupNetwork(list(naural = Kcor_naural, potting = Kcor_potting), 
                           nlambda1 = 10, nlambda2 = 10, truncate = 1e-10, criterion = 'aic')
 network_naural <- Res$naural
 network_potting <- Res$potting
+
+# %%synthesize data
+synthesize_scaled_data <- function(dat, net)
+  {
+    set.seed(10010)
+    graph <- (net != 0)*1     # SpiecEasi::make_graph('cluster', dat$n_OTUs, dat$n_edge)
+    attr(graph, "class") <- "graph"
+    Prec <- SpiecEasi::graph2prec(graph)
+    Cor <- cov2cor(SpiecEasi::prec2cov(Prec))
+    X <- SpiecEasi::synth_comm_from_counts(dat, mar = 2, distr = 'zinegbin', Sigma = Cor, n = nrow(dat))
+    return(X)
+  }
+otu_Ab_naural_synthesized <- synthesize_scaled_data(otu_Ab_naural,network_naural)
+otu_Ab_potting_synthesized <- synthesize_scaled_data(otu_Ab_potting,network_potting)
 
 # %% Plot edge weights distribution
 library(ggplot2)
