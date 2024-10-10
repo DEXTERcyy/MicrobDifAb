@@ -5,6 +5,10 @@ library(SpiecEasi)
 library(JGL)
 library(EstimateGroupNetwork)
 library(SpiecEasi)
+library(igraph)
+library(caret)     # For confusionMatrix function
+library(pROC)      # For ROC and AUC calculation
+library(MLmetrics) # For F1 Score, MCC
 
 data_soil_raw <- readRDS("data\\soil_sample_gr2.rds")
 # Remove taxa not seen more than 3 times in at least 20% of the samples.
@@ -24,81 +28,55 @@ shared_taxa <- intersect(colnames(otu_Ab_naural), colnames(otu_Ab_potting))
 otu_Ab_naural <- otu_Ab_naural[, shared_taxa]
 otu_Ab_potting <- otu_Ab_potting[, shared_taxa]
 
-# %%scaling
-common_scaling <- function(data)
-  {
+preprocess_and_estimate_network <- function(data_list, labels = NULL,  nlambda1 = 10, nlambda2 = 10) {
+  # Helper function for common scaling normalization
+  norm_to_total <- function(x) x / sum(x)
+  common_scaling <- function(data) {
     depths <- rowSums(data)
     data_normalized <- t(apply(data, 1, norm_to_total))
-    data_common_scaled <- round(data_normalized * min(depths))
-    
-    d <- ncol(data_common_scaled)
-    n <- nrow(data_common_scaled)
-    e <- d
-
-    return(list(
-      processed_data = data_common_scaled,
-      n_OTUs = d,
-      n_samples = n,
-      n_edge = e
-    ))
+    common_depth <- min(depths)  # Calculate only once
+    data_common_scaled <- round(data_normalized * common_depth) 
+    return(data_common_scaled)
   }
+  # Preprocessing steps for each data set in the list
+  processed_data_list <- lapply(data_list, function(data) {
+    scaled_data <- common_scaling(data)
+    mclr_data <- mclr(scaled_data) # Using SPRING's mclr
+    Kcor <- mixedCCA::estimateR(mclr_data, type = "trunc", method = "approx", tol = 1e-6, verbose = FALSE)$R
+    return(Kcor)
+  })
 
-otu_Ab_naural_scaled <- common_scaling(otu_Ab_naural)
-otu_Ab_potting_scaled <- common_scaling(otu_Ab_potting)
+  # Sample sizes for each dataset.
+  n_samples <- sapply(data_list, nrow)
 
-# mClr normalization 
-mclr <- function(dat, base = exp(1), tol = 1e-16, eps = NULL, atleast = 1) #from SPRING.r
-  {
-    dat <- as.matrix(dat)
-    nzero <- (dat >= tol)  # index for nonzero part
-    LOG <- ifelse(nzero, log(dat, base), 0.0) # take log for only nonzero values. zeros stay as zeros.
+  # Estimate the network using the preprocessed data
+  Res <- EstimateGroupNetwork(
+    processed_data_list, 
+    inputType = "list.of.covariance.matrices",
+    n = n_samples,
+    labels = labels, # Pass labels directly 
+    nlambda1 = nlambda1, 
+    nlambda2 = nlambda2, 
+    truncate = 1e-10, 
+    criterion = 'aic'
+  )
 
-    # centralize by the log of "geometric mean of only nonzero part" # it should be calculated by each row.
-    if (nrow(dat) > 1){
-      clrdat <- ifelse(nzero, LOG - rowMeans(LOG)/rowMeans(nzero), 0.0)
-    } else if (nrow(dat) == 1){
-      clrdat <- ifelse(nzero, LOG - mean(LOG)/mean(nzero), 0.0)
-    }
+  return(Res)
+}
+data_list <- list(naural = otu_Ab_naural, potting = otu_Ab_potting)
+network_results <- preprocess_and_estimate_network(data_list, labels = shared_taxa)
+network_naural <- network_results$naural
+network_potting <- network_results$potting
 
-    if (is.null(eps)){
-      if(atleast < 0){
-        warning("atleast should be positive. The functions uses default value 1 instead.")
-        atleast = 1
-      }
-      if( min(clrdat) < 0 ){ # to find the smallest negative value and add 1 to shift all data larger than zero.
-        positivecst <- abs(min(clrdat)) + atleast # "atleast" has default 1.
-      }else{
-        positivecst <- 0
-      }
-      # positive shift
-      ADDpos <- ifelse(nzero, clrdat + positivecst, 0.0) ## make all non-zero values strictly positive.
-      return(ADDpos)
-    } else if(eps == 0){
-      ## no shift. clr transform applied to non-zero proportions only. without pseudo count.
-      return(clrdat)
-    } else if(eps > 0){
-      ## use user-defined eps for additional positive shift.
-      ADDpos <- ifelse(nzero, clrdat + eps, 0.0)
-      return(ADDpos)
-    } else {
-      stop("check your eps value for additional positive shift. Otherwise, leave it as NULL.")
-    }
-  }
-otu_Ab_naural_mclr <- mclr(otu_Ab_naural_scaled$processed_data)
-otu_Ab_potting_mclr <- mclr(otu_Ab_potting_scaled$processed_data)
-Kcor_naural <- mixedCCA::estimateR(otu_Ab_naural_mclr, type = "trunc", method = "approx", tol = 1e-6, verbose = TRUE)$R
-Kcor_potting <- mixedCCA::estimateR(otu_Ab_potting_mclr, type = "trunc", method = "approx", tol = 1e-6, verbose = TRUE)$R
-# Graphical Lasso
-Res <- EstimateGroupNetwork(list(naural = Kcor_naural, potting = Kcor_potting), inputType = "list.of.covariance.matrices",
-                          n = c(dim(otu_Ab_naural)[1],dim(otu_Ab_potting)[1]), labels = shared_taxa,
-                          nlambda1 = 10, nlambda2 = 10, truncate = 1e-10, criterion = 'aic')
-network_naural <- Res$naural
-network_potting <- Res$potting
+# %% evaluation
+# Create the true metwork matrix obtaned from the data
+true_adj_naural <- (network_naural !=0)*1
+true_adj_potting <- (network_potting !=0)*1
 
-# %%synthesize data
+# %%Create a list to store the simulated matrices
+set.seed(10010)
 synthesize_scaled_data <- function(dat, net)
   {
-    set.seed(10010)
     graph <- (net != 0)*1     # SpiecEasi::make_graph('cluster', dat$n_OTUs, dat$n_edge)
     attr(graph, "class") <- "graph"
     Prec <- SpiecEasi::graph2prec(graph)
@@ -106,8 +84,93 @@ synthesize_scaled_data <- function(dat, net)
     X <- SpiecEasi::synth_comm_from_counts(dat, mar = 2, distr = 'zinegbin', Sigma = Cor, n = nrow(dat))
     return(X)
   }
-otu_Ab_naural_synthesized <- synthesize_scaled_data(otu_Ab_naural,network_naural)
-otu_Ab_potting_synthesized <- synthesize_scaled_data(otu_Ab_potting,network_potting)
+
+Sim_list <- list()
+for (i in 1:10)
+  {
+    Sim_list[[i]] <- list(
+      naural = synthesize_scaled_data(otu_Ab_naural, network_naural),
+      potting = synthesize_scaled_data(otu_Ab_potting, network_potting)
+    )
+  }
+# %%Simulation: estimated matrix as starting point close to true network.  TP/FP/Recall ... HV
+# Create a list to store the simulated matrices network
+Res_sim <- list()
+for (i in 1:10)
+  {
+    Res_sim[[i]] <- preprocess_and_estimate_network(Sim_list[[i]], labels = shared_taxa)
+  }
+
+# %%Create a list to store the simulated adjacency matrices
+Sim_adj <- list()
+for (i in 1:10)
+  {
+    Sim_adj[[i]] <- list(
+      naural = (Res_sim[[i]]$naural !=0)*1,
+      potting = (Res_sim[[i]]$potting !=0)*1
+    )
+  }
+ 
+# %%Define a function to calculate all performance metrics
+calculate_mcc <- function(tp, tn, fp, fn)
+  {
+    numerator <- (tp * tn) - (fp * fn)
+    denominator <- sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+  
+    # If the denominator is 0, return 0 to avoid NaN errors
+    if (denominator == 0) {
+      return(0)
+    } else {
+      return(numerator / denominator)
+    }
+  }
+
+calculate_metrics <- function(true_adj, sim_adj)
+  {
+    # Flatten the matrices into vectors (upper triangular part, excluding diagonal)
+    true_edges <- as.vector(true_adj[upper.tri(true_adj)])
+    sim_edges <- as.vector(sim_adj[upper.tri(sim_adj)])
+  
+    # Confusion matrix
+    cm <- confusionMatrix(as.factor(sim_edges), as.factor(true_edges), positive = "1")
+    tn <- as.numeric(cm$table[1,1]) #true negatives
+    fp <- as.numeric(cm$table[1,2]) #false positives
+    fn <- as.numeric(cm$table[2,1]) #false negatives
+    tp <- as.numeric(cm$table[2,2]) #true positives
+  
+    # Calculate TPR, FPR, Precision, Recall
+    tpr <- tp / (tp + fn)  # Sensitivity / Recall
+    fpr <- fp / (fp + tn)  # 1 - Specificity
+    precision <- tp / (tp + fp)
+    recall <- tpr
+  
+    # Calculate ROC and AUC
+    roc_obj <- roc(true_edges, sim_edges)
+    auc <- auc(roc_obj) # plot here
+  
+    # F1 Score
+    f1 <- F1_Score(sim_edges, true_edges)
+  
+    # MCC (Matthews correlation coefficient)
+    mcc <- calculate_mcc(tp, tn, fp, fn)
+  
+    # Return metrics as a list
+    return(list(TPR = tpr, FPR = fpr, Precision = precision, Recall = recall,
+                F1 = f1, AUC = auc, MCC = mcc))
+  }
+
+#%%Compare the true graph with each simulated graph
+confusion_results <- lapply(1:10, function(i) {
+  # Calculate metrics for both natural and potting
+  natural_metrics <- calculate_metrics(true_adj_naural, Sim_adj[[i]]$naural)
+  potting_metrics <- calculate_metrics(true_adj_potting, Sim_adj[[i]]$potting)
+  # Return both results as a named list
+  return(list(natural = natural_metrics, potting = potting_metrics))
+})
+
+# Convert the results list into a data frame for easy analysis
+results_df <- do.call(rbind, lapply(confusion_results, as.data.frame))
+
 
 # %% Plot edge weights distribution
 library(ggplot2)
@@ -210,3 +273,7 @@ ggraph(mygraph, layout = 'dendrogram', circular = TRUE) +
   ) +
   expand_limits(x = c(-1.3, 1.3), y = c(-1.3, 1.3))
 ggsave("naural_plot_synthesized.pdf", width = 12, height = 12, units = "in")
+
+# igraph package for network analysis
+# packages for ML network
+# extend simulated data to large data set
