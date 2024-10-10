@@ -146,7 +146,7 @@ calculate_metrics <- function(true_adj, sim_adj)
   
     # Calculate ROC and AUC
     roc_obj <- roc(true_edges, sim_edges)
-    auc <- auc(roc_obj) # plot here
+    auc <- as.numeric(auc(roc_obj)) # plot here
   
     # F1 Score
     f1 <- F1_Score(sim_edges, true_edges)
@@ -171,6 +171,53 @@ confusion_results <- lapply(1:10, function(i) {
 # Convert the results list into a data frame for easy analysis
 results_df <- do.call(rbind, lapply(confusion_results, as.data.frame))
 
+# %%Barplot the reults
+library(ggplot2)
+
+# Select only AUC columns and add a matrix identifier
+auc_df <- results_df %>%
+  dplyr::select(natural.AUC, potting.AUC) %>%
+  dplyr::mutate(matrix_id = 1:10) %>%
+  tidyr::pivot_longer(cols = c(natural.AUC, potting.AUC), 
+               names_to = "group", 
+               values_to = "AUC") %>%
+  dplyr::mutate(group = gsub(".AUC", "", group))
+
+# Create the bar plot
+ggplot(auc_df, aes(x = matrix_id, y = AUC, fill = group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "AUC for Natural and Potting Networks",
+       x = "Matrix ID",
+       y = "AUC") +
+  theme_bw()
+
+# %%
+library(ggplot2)
+library(tidyr)
+
+# Select columns and pivot to long format
+results_df_long <- results_df %>%
+  dplyr::select(starts_with("natural.") | starts_with("potting.")) %>%
+  pivot_longer(cols = everything(), 
+               names_to = c("group", "metric"), 
+               names_sep = "\\.",
+               values_to = "value") %>%
+  dplyr::mutate(matrix_id = rep(1:10, each = 14)) # Add matrix ID
+
+# Create separate plots for each metric
+for (metric_name in unique(results_df_long$metric)) {
+  plot_data <- results_df_long %>%
+    dplyr::filter(metric == metric_name)
+  
+  p <- ggplot(plot_data, aes(x = matrix_id, y = value, fill = group)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    labs(title = paste(metric_name, "for Simulated Networks"),
+         x = "Matrix ID",
+         y = metric_name) +
+    theme_bw()
+
+  ggsave(paste0(metric_name, "_plot.png"), p)
+}
 
 # %% Plot edge weights distribution
 library(ggplot2)
