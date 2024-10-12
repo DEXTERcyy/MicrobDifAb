@@ -223,8 +223,8 @@ for (metric_name in unique(results_df_long$metric)) {
 library(ggplot2)
 
 # Convert the correlation matrices to vectors
-cor_values_naural <- as.vector(Kcor_naural)
-cor_values_potting <- as.vector(Kcor_potting)
+cor_values_naural <- as.vector(network_naural)
+cor_values_potting <- as.vector(network_potting)
 
 # Create a data frame for plotting
 cor_df <- data.frame(

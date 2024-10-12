@@ -12,11 +12,14 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ## Preprocessing
 
 The raw dataset soil_**sample_gr2.rds** consists of three subsets: **otu_table**, **tax_table** and **sam_data**.
+
     - Firstly, remove taxa not seen more than 3 times in at least 20% of the samples. Due to the missing taxonomy information, only keep until the family level.
+
     - Split by soil conditions and filter 0 counts taxas
+
     - Keep only shared taxas in 2 conditions
 
-```{r, echo=FALSE, message=FALSE, warning=FALSE}
+```{r Preprocessing, echo=FALSE, message=FALSE, warning=FALSE}
 library(phyloseq)
 library(SPRING)
 library(SpiecEasi)
@@ -27,6 +30,11 @@ library(igraph)
 library(caret)     # For confusionMatrix function
 library(pROC)      # For ROC and AUC calculation
 library(MLmetrics) # For F1 Score, MCC
+library(ggraph)
+library(igraph)
+library(tidyverse)
+library(tibble)
+library(RColorBrewer)
 data_soil_raw <- readRDS("data\\soil_sample_gr2.rds")
 data_soil = filter_taxa(data_soil_raw, function(x) sum(x > 3) > (0.2*length(x)), TRUE)
 otu_Ab <- t(otu_table(data_soil))
@@ -39,8 +47,8 @@ otu_Ab_potting <- otu_Ab[soil_info == "Potting",
 shared_taxa <- intersect(colnames(otu_Ab_naural), colnames(otu_Ab_potting))
 otu_Ab_naural <- otu_Ab_naural[, shared_taxa]
 otu_Ab_potting <- otu_Ab_potting[, shared_taxa]
-head(otu_Ab_naural,5)
-head(otu_Ab_potting,5)
+head(otu_Ab_naural,n = c(5,5))
+head(otu_Ab_potting,n = c(5,5))
 ```
 
 ## Synthesize simulated networks
@@ -53,7 +61,7 @@ The second part of the function performs modifed centre logratio using **SPRING*
 
 Finally, apply joint graphical lasso and generate the true nerwork using the **EstimateGroupNetwork**
 
-```{r, echo = FALSE, message=FALSE, warning=FALSE}
+```{r Synthesize, echo = FALSE, message=FALSE, warning=FALSE}
 preprocess_and_estimate_network <- function(data_list, labels = NULL,  nlambda1 = 10, nlambda2 = 10){
   norm_to_total <- function(x) x / sum(x)
   common_scaling <- function(data) {
@@ -87,17 +95,17 @@ data_list <- list(naural = otu_Ab_naural, potting = otu_Ab_potting)
 network_results <- preprocess_and_estimate_network(data_list, labels = shared_taxa)
 network_naural <- network_results$naural
 network_potting <- network_results$potting
-head(network_naural,5)
-head(network_potting,5)
+head(network_naural,n = c(5,5))
+head(network_potting,n = c(5,5))
 ```
 
 ## Visualize on the network
 
 ### Edge weights distribution
 Now, plot the distribution of edge weights, which represents the abs correlation between two OTUs.
-```{r, echo = FALSE, message=FALSE, warning=FALSE}
-cor_values_naural <- as.vector(Kcor_naural)
-cor_values_potting <- as.vector(Kcor_potting)
+```{r Edge, echo = FALSE, message=FALSE, warning=FALSE}
+cor_values_naural <- as.vector(network_naural)
+cor_values_potting <- as.vector(network_potting)
 cor_df <- data.frame(
   correlation = c(cor_values_naural, cor_values_potting),
   group = factor(rep(c("Natural", "Potting"), each = length(cor_values_naural)))
@@ -113,35 +121,35 @@ hist_plot <- ggplot(cor_df, aes(x = correlation, fill = group)) +
 print(hist_plot)
 ```
 ### Plot network
-Visualize the network seperately.
-```{r, echo = FALSE, message=FALSE, warning=FALSE}
+Visualize the hierarchical edge network seperately.
+```{r Network, echo = FALSE, message=FALSE, warning=FALSE}
 otu_tax_df <- otu_tax %>%
-  as.data.frame() %>%
-  rownames_to_column("OTU") %>%
-  select(-OTU, everything(), OTU)
+as.data.frame() %>%
+tibble::rownames_to_column("OTU") %>%
+dplyr::select(OTU, everything())
 
 pairs <- list(
-  c("Kingdom", "Phylum"),
-  c("Phylum", "Class"),
-  c("Class", "Order"),
-  c("Order", "Family"),
-  c("Family", "OTU"))
+c("Kingdom", "Phylum"),
+c("Phylum", "Class"),
+c("Class", "Order"),
+c("Order", "Family"),
+c("Family", "OTU"))
 create_edges <- function(pair, data)
-  {
+{
     from <- data[[pair[1]]]
     to <- data[[pair[2]]]
     data.frame(from = from, to = to)
-  }
+}
 edges <- unique(do.call(rbind, lapply(pairs, create_edges, data = otu_tax_df[otu_tax_df$OTU %in% shared_taxa, ])))
 lower_tri <- lower.tri(network_naural, diag = FALSE)
 non_zero <- which(lower_tri & network_naural != 0, arr.ind = TRUE)
 connect <- data.frame(
-  from = rownames(network_naural)[non_zero[, 1]],
-  to = colnames(network_naural)[non_zero[, 2]],
-  score = network_naural[non_zero])
+from = rownames(network_naural)[non_zero[, 1]],
+to = colnames(network_naural)[non_zero[, 2]],
+score = network_naural[non_zero])
 vertices  <-  data.frame(
-  name = unique(c(as.character(edges$from), as.character(edges$to))) , 
-  value = runif(length(unique(c(as.character(edges$from), as.character(edges$to))))))
+name = unique(c(as.character(edges$from), as.character(edges$to))) , 
+value = runif(length(unique(c(as.character(edges$from), as.character(edges$to))))))
 vertices$group  <-  edges$from[ match( vertices$name, edges$to ) ]
 vertices$id <- NA
 myleaves <- which(is.na(match(vertices$name, edges$from)))
@@ -155,25 +163,25 @@ mygraph <- igraph::graph_from_data_frame( edges, vertices=vertices )
 from  <-  match( connect$from, vertices$name)
 to  <-  match( connect$to, vertices$name)
 p <- ggraph(mygraph, layout = 'dendrogram', circular = TRUE) + 
-  geom_conn_bundle(data = get_con(from = from, to = to), alpha=0.2, width=0.1, aes(colour = after_stat(index))) +
-  scale_edge_colour_gradient(low = "red", high = "blue") +
-  geom_node_text(aes(x = x*1.15, y=y*1.15, filter = leaf, label=name, angle = angle, hjust=hjust, colour=group), size=2, alpha=1) +
-  geom_node_point(aes(filter = leaf, x = x*1.07, y=y*1.07, colour=group, size=value, alpha=0.2)) +
-  scale_colour_manual(values= rep( brewer.pal(14,"Paired") , 30)) +
-  scale_size_continuous(range = c(0.1,10) ) +
-  theme_void() +
-  theme(
+geom_conn_bundle(data = get_con(from = from, to = to), alpha=0.2, width=0.1, aes(colour = after_stat(index))) +
+scale_edge_colour_gradient(low = "red", high = "blue") +
+geom_node_text(aes(x = x*1.15, y=y*1.15, filter = leaf, label=name, angle = angle, hjust=hjust, colour=group), size=2, alpha=1) +
+geom_node_point(aes(filter = leaf, x = x*1.07, y=y*1.07, colour=group, size=value, alpha=0.2)) +
+scale_colour_manual(values= rep(brewer.pal(14,"Paired") , 30)) +
+scale_size_continuous(range = c(0.1,10) ) +
+theme_void() +
+theme(
     legend.position="none",
     plot.margin=unit(c(0,0,0,0),"cm"),
-  ) +
-  expand_limits(x = c(-1.3, 1.3), y = c(-1.3, 1.3))
+) +
+expand_limits(x = c(-1.3, 1.3), y = c(-1.3, 1.3))
 print(p)
 
 ```
 ## Evaluate synthesized dataset
 Now, synthesize 10 dataset based on the origin/true aboundance data.
 
-```{r, echo = FALSE, message=FALSE, warning=FALSE}
+```{r Evaluate, echo = FALSE, message=FALSE, warning=FALSE}
 true_adj_naural <- (network_naural !=0)*1
 true_adj_potting <- (network_potting !=0)*1
 set.seed(10010)
@@ -261,11 +269,11 @@ confusion_results <- lapply(1:10, function(i)
     return(list(natural = natural_metrics, potting = potting_metrics))
     } )
 results_df <- do.call(rbind, lapply(confusion_results, as.data.frame))
-head(results_df,5)
+head(results_df,n = c(5,5))
 ```
 
 ## Plot barplots to see the simulated matrices
-```{r,  echo = FALSE,message=FALSE, warning=FALSE}
+```{r Plot,  echo = FALSE,message=FALSE, warning=FALSE}
 results_df_long <- results_df %>%
   dplyr::select(starts_with("natural.") | starts_with("potting.")) %>%
   tidyr::pivot_longer(cols = everything(), 
