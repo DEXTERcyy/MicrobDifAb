@@ -19,7 +19,7 @@ The raw dataset soil_**sample_gr2.rds** consists of three subsets: **otu_table**
 
     - Keep only shared taxas in 2 conditions
 
-```{r Preprocessing, echo=FALSE, message=FALSE, warning=FALSE}
+```{r Preprocessing, message=FALSE, warning=FALSE}
 library(phyloseq)
 library(SPRING)
 library(SpiecEasi)
@@ -61,7 +61,7 @@ The second part of the function performs modifed centre logratio using **SPRING*
 
 Finally, apply joint graphical lasso and generate the true nerwork using the **EstimateGroupNetwork**
 
-```{r Synthesize, echo = FALSE, message=FALSE, warning=FALSE}
+```{r Synthesize, message=FALSE, warning=FALSE}
 preprocess_and_estimate_network <- function(data_list, labels = NULL,  nlambda1 = 10, nlambda2 = 10){
   norm_to_total <- function(x) x / sum(x)
   common_scaling <- function(data) {
@@ -103,7 +103,7 @@ head(network_potting,n = c(5,5))
 
 ### Edge weights distribution
 Now, plot the distribution of edge weights, which represents the abs correlation between two OTUs.
-```{r Edge, echo = FALSE, message=FALSE, warning=FALSE}
+```{r Edge, message=FALSE, warning=FALSE}
 cor_values_naural <- as.vector(network_naural)
 cor_values_potting <- as.vector(network_potting)
 cor_df <- data.frame(
@@ -122,7 +122,7 @@ print(hist_plot)
 ```
 ### Plot network
 Visualize the hierarchical edge network seperately.
-```{r Network, echo = FALSE, message=FALSE, warning=FALSE}
+```{r Network, message=FALSE, warning=FALSE}
 otu_tax_df <- otu_tax %>%
 as.data.frame() %>%
 tibble::rownames_to_column("OTU") %>%
@@ -181,7 +181,7 @@ print(p)
 ## Evaluate synthesized dataset
 Now, synthesize 10 dataset based on the origin/true aboundance data.
 
-```{r Evaluate, echo = FALSE, message=FALSE, warning=FALSE}
+```{r Evaluate, message=FALSE, warning=FALSE}
 true_adj_naural <- (network_naural !=0)*1
 true_adj_potting <- (network_potting !=0)*1
 set.seed(10010)
@@ -273,7 +273,7 @@ head(results_df,n = c(5,5))
 ```
 
 ## Plot barplots to see the simulated matrices
-```{r Plot,  echo = FALSE,message=FALSE, warning=FALSE}
+```{r Plot, message=FALSE, warning=FALSE}
 results_df_long <- results_df %>%
   dplyr::select(starts_with("natural.") | starts_with("potting.")) %>%
   tidyr::pivot_longer(cols = everything(), 
