@@ -9,7 +9,11 @@ library(igraph)
 library(caret)     # For confusionMatrix function
 library(pROC)      # For ROC and AUC calculation
 library(MLmetrics) # For F1 Score, MCC
-
+library(ggplot2)
+library(tidyr)
+library(ggraph)
+library(tidyverse)
+library(RColorBrewer)
 data_soil_raw <- readRDS("data\\soil_sample_gr2.rds")
 # Remove taxa not seen more than 3 times in at least 20% of the samples.
 data_soil = filter_taxa(data_soil_raw, function(x) sum(x > 3) > (0.2*length(x)), TRUE)
@@ -172,8 +176,6 @@ confusion_results <- lapply(1:10, function(i) {
 results_df <- do.call(rbind, lapply(confusion_results, as.data.frame))
 
 # %%Barplot the reults
-library(ggplot2)
-
 # Select only AUC columns and add a matrix identifier
 auc_df <- results_df %>%
   dplyr::select(natural.AUC, potting.AUC) %>%
@@ -192,8 +194,6 @@ ggplot(auc_df, aes(x = matrix_id, y = AUC, fill = group)) +
   theme_bw()
 
 # %%
-library(ggplot2)
-library(tidyr)
 
 # Select columns and pivot to long format
 results_df_long <- results_df %>%
@@ -220,7 +220,6 @@ for (metric_name in unique(results_df_long$metric)) {
 }
 
 # %% Plot edge weights distribution
-library(ggplot2)
 
 # Convert the correlation matrices to vectors
 cor_values_naural <- as.vector(network_naural)
@@ -249,10 +248,6 @@ ggsave("histogram_comparison.pdf", hist_plot, width = 10, height = 6)
 return(hist_plot)
 
 # %%Plot Network
-library(ggraph)
-library(igraph)
-library(tidyverse)
-library(RColorBrewer)
 
 # Extract taxonomic information
 otu_tax_df <- otu_tax %>%
